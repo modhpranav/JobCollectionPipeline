@@ -1,8 +1,11 @@
 package javaism;
 
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -10,47 +13,83 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.store.FSDirectory;
 
+import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.util.*;
 
 
 public class FuzzyMatchWords {
 
-    private final Directory directory;
-
-    public FuzzyMatchWords(List<String> words) throws Exception {
-        
-        // Create an index
-        this.directory = new RAMDirectory();
-        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
-        IndexWriter indexWriter = new IndexWriter(this.directory, config);
-        for (String word : words){
-            addDocument(indexWriter, word);
-        }
-        indexWriter.close();
-    }
     
-    public List<String> matcher(List<String> jobWords){
+    private static final String SKILLS = "Skill";
+    
+    private static final String INDEXDIR = "configData/index";
+
+    private Set<String> indexedSkills = new HashSet<String>();
+    
+    public Set<String> matcher(String jobDescription) throws IOException{
 
         // Search for similar terms
-        IndexSearcher searcher = new IndexSearcher(this.directory);
-        QueryParser parser = new QueryParser("field", new StandardAnalyzer());
-        List<String> res = new ArrayList<String>();
+        DirectoryReader reader = DirectoryReader.open(FSDirectory.open(FileSystems.getDefault().getPath(INDEXDIR)));
+        IndexSearcher searcher = new IndexSearcher(reader);
+        QueryParser parser = new QueryParser(SKILLS, new StandardAnalyzer());
+        Set<String> res = new HashSet<String>();
+        Set<String> jobWords = new HashSet<String>(Arrays.asList(jobDescription.split("\\s+")));
         for (String word : jobWords) {
-            Query query = parser.parse(word); // ~ indicates fuzzy search
-            TopDocs results = searcher.search(query, 2);
-            for (ScoreDoc scoreDoc : results.scoreDocs) {
-                Document doc = searcher.doc(scoreDoc.doc);
-                System.out.println(doc.get("field"));
+            try{
+                Query query = parser.parse(word);
+                TopDocs results = searcher.search(query, 1);
+                for (ScoreDoc scoreDoc : results.scoreDocs) {
+                    Document doc = searcher.doc(scoreDoc.doc);
+                    res.add(doc.get(SKILLS));
+                }
+                }catch (Exception e) {
+                    e.printStackTrace();
+                    System.out.println("Failed to get matching skill: " + word);
             }
-        }return res;
+        }
+        reader.close();
+        return res;
     }
 
-    private static void addDocument(IndexWriter indexWriter, String text) throws Exception {
-        Document doc = new Document();
-        doc.add(new Field("field", text, Field.Store.YES, Field.Index.ANALYZED));
-        indexWriter.addDocument(doc);
+    public Map<String, String> createIndex(List<String> words) throws Exception {
+        Analyzer analyzer = new StandardAnalyzer();
+        IndexWriterConfig config = new IndexWriterConfig(analyzer);
+        this.indexedSkills = this.getExistingWords();
+        IndexWriter indexWriter = new IndexWriter(
+            FSDirectory.open(FileSystems.getDefault().getPath(INDEXDIR)), config
+        );
+        Map <String, String> result = new HashMap<String, String>();
+        for (String word : words){
+            if (!indexedSkills.contains(word)){
+                try{
+                    Document doc = new Document();
+                    doc.add(new TextField(SKILLS, word, Field.Store.YES));
+                    indexWriter.addDocument(doc);
+                    result.put("Added words", result.get("Added words")+","+word);
+                }catch (Exception e){
+                    e.printStackTrace();
+                    result.put("Failed words", result.get("Failed words")+","+word);
+                }
+            }
+        }
+        indexWriter.close();
+        return result;
+    }
+
+    private Set<String> getExistingWords() throws IOException {
+        DirectoryReader reader = DirectoryReader.open(FSDirectory.open(FileSystems.getDefault().getPath(INDEXDIR)));
+        IndexSearcher searcher = new IndexSearcher(reader);
+        QueryParser parser = new QueryParser(SKILLS, new StandardAnalyzer());
+        Set<String> existingWords = new HashSet<>();
+        for (int i = 0; i < reader.maxDoc(); i++) {
+            Document doc = reader.document(i);
+            String skill = doc.get(SKILLS);
+            existingWords.add(skill);
+        }
+        reader.close();
+        return existingWords;
     }
 }

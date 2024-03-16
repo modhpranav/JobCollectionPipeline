@@ -66,11 +66,12 @@ public class App {
         return this.extractSkills(text);
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         App instance = new App();
-        FuzzyMatch fMatch = new FuzzyMatchWords(instance.existingWords);
-        List<String> skillsFound = instance.run("Some Python Java job description.");
-        skillsFound = fMatch.matcher(skillsFound);
+        FuzzyMatchWords fMatch = new FuzzyMatchWords();
+        Map<String, String> indexStatus = fMatch.createIndex(new ArrayList<String>(instance.existingWords));
+        System.out.println(indexStatus.get("Failed words") != null ? ("Fail to index: " + indexStatus.get("Failed words")) : "All words indexed.");
+        Set<String> skillsFound = fMatch.matcher("Some Python Java job description dockercompose, docker DOcker.");
         System.out.println("Final Result:");
         System.out.println(skillsFound);
     }
